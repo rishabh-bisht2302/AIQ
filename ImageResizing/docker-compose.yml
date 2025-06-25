@@ -1,0 +1,40 @@
+services:
+  mongodb:
+    image: mongo:7.0
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: user
+      MONGO_INITDB_ROOT_PASSWORD: password
+      MONGO_INITDB_DATABASE: imagedb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      MONGODB_URI: mongodb://user:password@mongodb:27017/imagedb?authSource=admin
+      API_HOST: 0.0.0.0
+      API_PORT: 8000
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    volumes:
+      - ./data:/app/data
+    command: >
+      sh -c "
+        echo 'Waiting for database to be ready...' &&
+        sleep 5 &&
+        python main.py /app/data/SampleDataProject2.csv --clear-db &&
+        python -m uvicorn src.api:app --host 0.0.0.0 --port 8000
+      "
+
+volumes:
+  mongo_data: 

@@ -1,0 +1,98 @@
+version: '3.8'
+
+services:
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: powerplants_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - powerplants_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      timeout: 10s
+      retries: 5
+      interval: 10s
+      start_period: 10s
+
+  # MySQL Database
+  db:
+    image: mysql:8.0
+    container_name: powerplants_db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: powerplants
+      MYSQL_USER: powerplant_user
+      MYSQL_PASSWORD: powerplant_pass
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - powerplants_network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "powerplant_user", "-ppowerplant_pass"]
+      timeout: 20s
+      retries: 10
+      interval: 10s
+      start_period: 30s
+
+  # Seed database with CSV data
+  seed:
+    build: .
+    container_name: powerplants_seed
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      - NODE_ENV=development
+      - DB_HOST=db
+      - DB_PORT=3306
+      - DB_NAME=powerplants
+      - DB_USER=powerplant_user
+      - DB_PASSWORD=powerplant_pass
+    command: ["npm", "run", "ingest-egrid"]
+    volumes:
+      - ./data:/app/data
+    networks:
+      - powerplants_network
+
+  # Main application
+  app:
+    build: .
+    container_name: powerplants_app
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - DB_HOST=db
+      - DB_PORT=3306
+      - DB_NAME=powerplants
+      - DB_USER=powerplant_user
+      - DB_PASSWORD=powerplant_pass
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    networks:
+      - powerplants_network
+    restart: unless-stopped
+
+volumes:
+  mysql_data:
+  redis_data:
+
+networks:
+  powerplants_network:
+    driver: bridge 
